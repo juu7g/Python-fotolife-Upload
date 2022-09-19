@@ -129,24 +129,26 @@ class HatenaFotolifeAtom():
         headers = {'X-WSSE': self.wsse(os.getenv("py_hatena_username"), os.getenv("py_hatena_api_key"))}
         endpoint = 'https://f.hatena.ne.jp/atom/post/'
         
-        # postのdataに日本語が含まれる場合、エンコードが必要
-        r = requests.post(endpoint, data=data.encode("utf-8"), headers=headers)
-
-        print(f'--result-- status code={r.status_code}')
-        if r.status_code != 201:
-            sys.stderr.write(f'Error!\nstatus_code: {r.status_code}\nmessage: {r.text}')
-            return "", ""
         try:
-            r.raise_for_status()
+            # postのdataに日本語が含まれる場合、エンコードが必要
+            r = requests.post(endpoint, data=data.encode("utf-8"), headers=headers)
+
+            print(f'--result-- status code={r.status_code}')
+            if r.status_code != 201:    # この文不要ですね
+                sys.stderr.write(f'Error!\nstatus_code: {r.status_code}\nmessage: {r.text}')
+                return "", ""
+            r.raise_for_status()    # 200番台以外は例外を発生
+            # 例外がないのでurlを返す
             url1, url2 = self.get_image_url_et(r.text)
             print(f'url  : {url1}')
             print(f'foto : {url2}')
+        except requests.exceptions.ConnectionError:
+            sys.stderr.write('Connection Error!')
+            return "", ""
         except:
             sys.stderr.write(f'Error!\nstatus_code: {r.status_code}\nmessage: {r.text}')
-        if url1:
-            return url1, url2
-        else:
             return "", ""
+        return url1, url2
         
     def log_output(self, image_path:str, folder:str, image_url:str, foto:str):
         """
@@ -159,8 +161,14 @@ class HatenaFotolifeAtom():
             str:        画像url
             str:        画像foto記法
         """
+        # pyinstallerで作成したexeか判断してexeの場所を特定する
+        if getattr(sys, 'frozen', False):
+            exe_path = os.path.dirname(sys.executable)
+        else:
+            exe_path = sys.prefix
         foto = foto.replace(":image", ":plain")
         logfile_name = f"fotolife_{datetime.now().strftime('%y%m%d')}.log"
+        logfile_name = os.path.join(exe_path, logfile_name)
         upload_time = f"Time:{datetime.now().strftime('%Y-%m-%d %H:%M')}"
         msg = f"\n【{os.path.basename(image_path)}】Folder:{folder} {upload_time}\n url  : ![]({image_url}) \n foto : [{foto}] \n"
         try:
@@ -169,44 +177,66 @@ class HatenaFotolifeAtom():
         except Exception as e:
             print(f"書き込みエラー：{e}")
 
-def upload_image_to_hatena():
+class HatenaFotolifeUI():
     """
-    画像をはてなフォトライフへアップロードする
-    はてなフォトライフのアップロード先フォルダを入力して指定する
-    画像はコマンドライン引数、基本はドラッグアンドドロップ
+    はてなフォトファイル制御クラス
     """
-    hatena_atom = HatenaFotolifeAtom()
-    exp = (".png", ".jpg", ".jpeg", ".gif")     # 対象の拡張子
-    kwargs = {}
+    def upload_image_to_hatena(self, paths:list=None, folder=None):
+        """
+        画像をはてなフォトライフへアップロードする
+        はてなフォトライフのアップロード先フォルダを入力して指定する
+        画像はコマンドライン引数、基本はドラッグアンドドロップ
+        Args:
+            list:   アップロードする画像のパスのリスト。Noneの場合、ファイル選択ダイアログを表示
+            folder: はてなフォトライフの保存先フォルダ。存在しない場合、作成される
+        Returns:
+            dict:   key:パス、value:アップロードした画像のURLとfoto記法のタプル(URL, foto) 
+        """
+        hatena_atom = HatenaFotolifeAtom()
+        exp = (".png", ".jpg", ".jpeg", ".gif")     # 対象の拡張子
+        kwargs = {}
+        via_command = folder is None
 
-    # コマンドライン引数からドラッグ＆ドロップされたファイル情報を取得
-    if len(sys.argv) > 1:
-        file_paths = tuple(sys.argv[1:])
-    else:
-        # 画像を指定
-        root = tk.Tk()      # 自動で作成されるToplevelオブジェクトを手動で作成し
-        root.withdraw()     # 撤去状態にする
-        file_paths = filedialog.askopenfilenames(
-            filetypes=[("画像", ".png .jpg .jpeg .gif"), ("PNG", ".png"), ("JPEG", ".jpg .jpeg"), ("GIF", ".gif"), ("すべて", "*")])
+        # コマンドライン引数からドラッグ＆ドロップされたファイル情報を取得
+        if paths:
+            file_paths = paths
+        elif len(sys.argv) > 1:
+            file_paths = tuple(sys.argv[1:])
+        else:
+            # 画像を指定
+            root = tk.Tk()      # 自動で作成されるToplevelオブジェクトを手動で作成し
+            root.withdraw()     # 撤去状態にする
+            file_paths = filedialog.askopenfilenames(
+                filetypes=[("画像", ".png .jpg .jpeg .gif"), ("PNG", ".png"), ("JPEG", ".jpg .jpeg"), ("GIF", ".gif"), ("すべて", "*")])
 
-    # アップロード先フォルダを入力
-    folder = input("はてなフォトライフのフォルダ名を指定してください(無指定の場合は「Hatena Blog」)\n>")
-    if not folder:
-        folder = "Hatena Blog"
-    kwargs["folder"] = folder
+        # アップロード先フォルダを入力
+        if not folder:
+            folder = input("はてなフォトライフのフォルダ名を指定してください(無指定の場合は「Hatena Blog」)\n>")
+        if not folder:
+            folder = "Hatena Blog"
+        kwargs["folder"] = folder
 
-    # ファイルごとにアップロード
-    for file_ in file_paths:
-        if not os.path.splitext(file_)[1].lower() in exp:
-            print(f"File : {os.path.basename(file_)}は対象外のファイルです。")
-            continue
+        results = {}
 
-        title_ = os.path.splitext(os.path.basename(file_))[0]       # ローカルファイル名をタイトルに
-        data = hatena_atom.create_data(file_, title_, **kwargs)     # 送信データ作成
-        print(f"【{os.path.basename(file_)}】")
-        image_url, foto = hatena_atom.post_hatena(data)             # 送信と結果取得
-        hatena_atom.log_output(file_, folder, image_url, foto)              # ログ出力
-    input("\n確認したらEnterキーを押してください")
+        # ファイルごとにアップロード
+        for file_ in file_paths:
+            if not os.path.splitext(file_)[1].lower() in exp:
+                print(f"File : {os.path.basename(file_)}は対象外のファイルです。")
+                continue
+
+            title_ = os.path.splitext(os.path.basename(file_))[0]       # ローカルファイル名をタイトルに
+            data = hatena_atom.create_data(file_, title_, **kwargs)     # 送信データ作成
+            print(f"【{os.path.basename(file_)}】")
+            image_url, foto = hatena_atom.post_hatena(data)             # 送信と結果取得
+            hatena_atom.log_output(file_, folder, image_url, foto)      # ログ出力
+            # image_urlが空なら戻り値に追加しない。エラーのため
+            if image_url:
+                results[file_] = (image_url, foto)
+        
+        if via_command:
+            input("\n確認したらEnterキーを押してください")
+        
+        return results  # 画像のURLとfoto記法を返す
 
 def test_parse_xml():
     """
@@ -233,5 +263,5 @@ def test_parse_xml():
 
 
 if __name__ == '__main__':
-    upload_image_to_hatena()
+    HatenaFotolifeUI().upload_image_to_hatena()
     # test_parse_xml()
