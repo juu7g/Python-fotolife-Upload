@@ -6,7 +6,7 @@ from base64 import b64encode
 from hashlib import sha1
 from typing import Tuple
 import sys, os, secrets
-from datetime import datetime
+from datetime import datetime, UTC
 import requests
 import xml.etree.ElementTree as ET
 import tkinter as tk
@@ -22,7 +22,7 @@ class HatenaFotolifeAtom():
         xmlからETのiterで情報を取得
 
         Args:
-            str:        xml
+            xml(str):   xml
         Returns:
             str, str:   画像url、画像foto記法
         """
@@ -37,7 +37,7 @@ class HatenaFotolifeAtom():
         iterより少し遅い
 
         Args:
-            str:        xml
+            xml(str):   xml
         Returns:
             str, str:   画像url、画像foto記法
         """
@@ -54,7 +54,7 @@ class HatenaFotolifeAtom():
         単純なxmlだからかETに比べて遅い
 
         Args:
-            str:        xml
+            xml(str):   xml
         Returns:
             str, str:   画像url、画像foto記法
         """
@@ -65,16 +65,15 @@ class HatenaFotolifeAtom():
         url2 = soup.find("hatena:syntax").get_text()
         return url1, url2
 
-
-    def wsse(self, username: str, api_key: str) ->str:
+    def wsse(self, username:str, api_key:str) ->str:
         """
         WSSE認証
 
         Args:
-            str:        はてなフォトライフのユーザーID
-            str:        はてなブログのapi key
+            username(str):  はてなフォトライフのユーザーID
+            api_key(str):   はてなブログのapi key
         Returns:
-            str:        送信用認証WSSEデータ
+            str:            送信用認証WSSEデータ
         """
         # 安全なnonceの生成
         # token_urlsafe()で生成してBase64でエンコードしたが長さは4の倍数でないとデコードできない
@@ -82,7 +81,8 @@ class HatenaFotolifeAtom():
         # nonce64 = secrets.token_urlsafe(16)  
         nonce = secrets.token_bytes()                   # 安全な乱数発生
         nonce64 = b64encode(nonce).decode()             # b64encodeはバイト型のため文字型に変換
-        created = datetime.utcnow().isoformat() + "Z"   # UTC(協定世界時)でiso表記
+        # created = datetime.utcnow().isoformat() + "Z"   # UTC(協定世界時)でiso表記
+        created = datetime.now(UTC).isoformat()     # UTC(協定世界時)でiso表記
 
         # PasswordDigest：Nonce, Created, APIキーを文字列連結し、SHA1アルゴリズムでダイジェスト化
         # 更にBase64エンコード
@@ -99,9 +99,9 @@ class HatenaFotolifeAtom():
         送信画像データの作成
 
         Args:
-            str:        画像のパス
-            str:        はてなフォトライフ上で画像につけるタイトル
-            str:        はてなフォトライフのフォルダ
+            file_name(str): 画像のパス
+            title(str):     はてなフォトライフ上で画像につけるタイトル
+            folder(str):    はてなフォトライフのフォルダ
         Returns:
             str:        送信用xmlデータ
         """
@@ -122,7 +122,7 @@ class HatenaFotolifeAtom():
         画像アップロード
 
         Args:
-            str:        送信データ
+            data(str):  送信データ
         Returns:
             str, str:   画像url、画像foto記法
         """
@@ -156,10 +156,10 @@ class HatenaFotolifeAtom():
                 追加型書き込み
                 コピペでmarkdows記法で使用できるように編集して出力
         Args:
-            str:        画像ファイルパス
-            str:        フォルダ名
-            str:        画像url
-            str:        画像foto記法
+            image_path(str):画像ファイルパス
+            folder(str):    フォルダ名
+            image_url(str): 画像url
+            foto(str):      画像foto記法
         """
         # pyinstallerで作成したexeか判断してexeの場所を特定する
         if getattr(sys, 'frozen', False):
@@ -186,14 +186,17 @@ class HatenaFotolifeUI():
         画像をはてなフォトライフへアップロードする
         はてなフォトライフのアップロード先フォルダを入力して指定する
         画像はコマンドライン引数、基本はドラッグアンドドロップ
+
         Args:
-            list:   アップロードする画像のパスのリスト。Noneの場合、ファイル選択ダイアログを表示
-            folder: はてなフォトライフの保存先フォルダ。存在しない場合、作成される
+            paths(list):    アップロードする画像のパスのリスト。
+                            Noneの場合、ファイル選択ダイアログを表示
+            folder(str):    はてなフォトライフの保存先フォルダ。
+                            存在しない場合、作成される
         Returns:
             dict:   key:パス、value:アップロードした画像のURLとfoto記法のタプル(URL, foto) 
         """
         hatena_atom = HatenaFotolifeAtom()
-        exp = (".png", ".jpg", ".jpeg", ".gif")     # 対象の拡張子
+        exp = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif")     # 対象の拡張子 webp, avifを追加
         kwargs = {}
         via_command = folder is None
 
@@ -207,7 +210,8 @@ class HatenaFotolifeUI():
             root = tk.Tk()      # 自動で作成されるToplevelオブジェクトを手動で作成し
             root.withdraw()     # 撤去状態にする
             file_paths = filedialog.askopenfilenames(
-                filetypes=[("画像", ".png .jpg .jpeg .gif"), ("PNG", ".png"), ("JPEG", ".jpg .jpeg"), ("GIF", ".gif"), ("すべて", "*")])
+                filetypes=[("画像", ".png .jpg .jpeg .gif .webp .avif"), ("PNG", ".png"), ("JPEG", ".jpg .jpeg"), ("GIF", ".gif"), 
+                ("WebP", ".webp"), ("AVIF", ".avif"), ("すべて", "*")])
 
         # アップロード先フォルダを入力
         if not folder:
