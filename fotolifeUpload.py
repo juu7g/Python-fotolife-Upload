@@ -6,6 +6,7 @@ from base64 import b64encode
 from hashlib import sha1
 from typing import Tuple
 import sys, os, secrets
+from pathlib import Path
 from datetime import datetime, UTC
 import requests
 import xml.etree.ElementTree as ET
@@ -117,14 +118,15 @@ class HatenaFotolifeAtom():
         </entry>"""
         return xml_data
 
-    def post_hatena(self, data:str) ->Tuple[str, str]:
+    def post_hatena(self, data:str) ->Tuple[str, str, str]:
         """
         画像アップロード
 
         Args:
             data(str):  送信データ
+
         Returns:
-            str, str:   画像url、画像foto記法
+            str, str, str:   画像url、画像foto記法、エラーメッセージ
         """
         headers = {'X-WSSE': self.wsse(os.getenv("py_hatena_username"), os.getenv("py_hatena_api_key"))}
         endpoint = 'https://f.hatena.ne.jp/atom/post/'
@@ -143,12 +145,12 @@ class HatenaFotolifeAtom():
             print(f'url  : {url1}')
             print(f'foto : {url2}')
         except requests.exceptions.ConnectionError:
-            sys.stderr.write('Connection Error!')
-            return "", ""
+            err = 'ネットワーク接続エラー!'
+            return "", "", err
         except:
-            sys.stderr.write(f'Error!\nstatus_code: {r.status_code}\nmessage: {r.text}')
-            return "", ""
-        return url1, url2
+            err = f'エラー: {r.status_code}: {r.text}'
+            return "", "", err
+        return url1, url2, ""
         
     def log_output(self, image_path:str, folder:str, image_url:str, foto:str):
         """
@@ -165,10 +167,12 @@ class HatenaFotolifeAtom():
         if getattr(sys, 'frozen', False):
             exe_path = os.path.dirname(sys.executable)
         else:
-            exe_path = sys.prefix
+            exe_path = os.getcwd()
+        log_dir = Path(exe_path) / "logs"
+        log_dir.mkdir(exist_ok=True)        # 無ければフォルダ作成。
         foto = foto.replace(":image", ":plain")
         logfile_name = f"fotolife_{datetime.now().strftime('%y%m%d')}.log"
-        logfile_name = os.path.join(exe_path, logfile_name)
+        logfile_name = log_dir / logfile_name
         upload_time = f"Time:{datetime.now().strftime('%Y-%m-%d %H:%M')}"
         msg = f"\n【{os.path.basename(image_path)}】Folder:{folder} {upload_time}\n url  : ![]({image_url}) \n foto : [{foto}] \n"
         try:
@@ -181,7 +185,7 @@ class HatenaFotolifeUI():
     """
     はてなフォトファイル制御クラス
     """
-    def upload_image_to_hatena(self, paths:list=None, folder=None):
+    def upload_image_to_hatena(self, paths:list=None, folder=None, out_log:bool=True):
         """
         画像をはてなフォトライフへアップロードする
         はてなフォトライフのアップロード先フォルダを入力して指定する
@@ -192,8 +196,11 @@ class HatenaFotolifeUI():
                             Noneの場合、ファイル選択ダイアログを表示
             folder(str):    はてなフォトライフの保存先フォルダ。
                             存在しない場合、作成される
+            out_log(bool):  ログ出力の有無
+
         Returns:
             dict:   key:パス、value:アップロードした画像のURLとfoto記法のタプル(URL, foto) 
+            str:    エラーメッセージ
         """
         hatena_atom = HatenaFotolifeAtom()
         exp = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif")     # 対象の拡張子 webp, avifを追加
@@ -231,16 +238,20 @@ class HatenaFotolifeUI():
             title_ = os.path.splitext(os.path.basename(file_))[0]       # ローカルファイル名をタイトルに
             data = hatena_atom.create_data(file_, title_, **kwargs)     # 送信データ作成
             print(f"【{os.path.basename(file_)}】")
-            image_url, foto = hatena_atom.post_hatena(data)             # 送信と結果取得
-            hatena_atom.log_output(file_, folder, image_url, foto)      # ログ出力
+            image_url, foto, err = hatena_atom.post_hatena(data)         # 送信と結果取得
+            if err:
+                print(f"{err}")
             # image_urlが空なら戻り値に追加しない。エラーのため
-            if image_url:
-                results[file_] = (image_url, foto)
+            if not image_url: continue
+
+            results[file_] = (image_url, foto)
+            if out_log:
+                hatena_atom.log_output(file_, folder, image_url, foto)      # ログ出力
         
         if via_command:
             input("\n確認したらEnterキーを押してください")
         
-        return results  # 画像のURLとfoto記法を返す
+        return results, err  # 画像のURLとfoto記法、エラーメッセージを返す
 
 def test_parse_xml():
     """
